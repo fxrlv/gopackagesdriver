@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -188,4 +190,38 @@ func (d *Driver) ReadCacheDir(overlay fsutil.Overlay) error {
 
 		return nil
 	})
+}
+
+func (d *Driver) MakeOverlay(sync bool) (string, error) {
+	if d.workspaceDir == "" {
+		return "", fmt.Errorf("workspace must be set")
+	}
+
+	path := filepath.Join(d.fsys.Dir(), "overlay.json")
+	if !sync {
+		_, err := os.Lstat(path)
+		if err == nil || !errors.Is(err, os.ErrNotExist) {
+			return path, err
+		}
+	}
+
+	overlay := fsutil.NewOverlay()
+	if sync {
+		err := d.ReadCacheDir(overlay)
+		if err != nil {
+			return "", err
+		}
+	}
+
+	data, err := fsutil.MarshalOverlay(overlay)
+	if err != nil {
+		return "", err
+	}
+
+	err = d.fsys.WriteFile("overlay.json", data)
+	if err != nil {
+		return "", err
+	}
+
+	return path, nil
 }
