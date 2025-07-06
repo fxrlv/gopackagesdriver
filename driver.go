@@ -1,54 +1,62 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
+
+	"github.com/fxrlv/gopackagesdriver/internal/filecache"
+	"github.com/fxrlv/gopackagesdriver/internal/fsutil"
 )
 
 type DriverConfig struct {
-	Workspace string
-	Bazel     string
-
-	Workdir string
+	WorkspaceDir string
+	WorkingDir   string
+	Bazel        string
 }
 
 type Driver struct {
-	workdir string
-	bazel   *Bazel
+	workspaceDir string
+	workingDir   string
+	bazel        string
+
+	fsys *filecache.DirFS
 }
 
 func NewDriver(config *DriverConfig) (*Driver, error) {
-	if config == nil || config.Workspace == "" {
+	if config == nil || config.WorkspaceDir == "" {
 		return &Driver{}, nil
 	}
 
-	cmd := config.Bazel
-	if cmd == "" {
-		cmd = "bazel"
-	}
-
-	bazel, err := NewBazel(cmd, config.Workspace)
+	fsys, err := filecache.Open(os.TempDir(), []byte(config.WorkspaceDir))
 	if err != nil {
 		return nil, err
 	}
 
+	bazel := config.Bazel
+	if bazel == "" {
+		bazel = "bazel"
+	}
+
 	return &Driver{
-		workdir: config.Workdir,
-		bazel:   bazel,
+		workspaceDir: config.WorkspaceDir,
+		workingDir:   config.WorkingDir,
+		bazel:        bazel,
+		fsys:         fsys,
 	}, nil
 }
 
 func (d *Driver) Serve(req *packages.DriverRequest, patterns []string) (*packages.DriverResponse, error) {
-	if d.bazel == nil {
+	if d.workspaceDir == "" {
 		return &packages.DriverResponse{
 			NotHandled: true,
 		}, nil
 	}
 
-	rel, err := filepath.Rel(d.bazel.Workspace(), d.workdir)
+	rel, err := filepath.Rel(d.workspaceDir, d.workingDir)
 	if err != nil || strings.HasPrefix(rel, "..") {
 		return &packages.DriverResponse{
 			NotHandled: true,
@@ -73,29 +81,45 @@ func (d *Driver) Serve(req *packages.DriverRequest, patterns []string) (*package
 		BuildFlags: req.BuildFlags,
 		Tests:      req.Tests,
 		Overlay:    req.Overlay,
-		Dir:        d.workdir,
+		Dir:        d.workingDir,
 	}
 
 	return d.LoadWorkspace(&cfg, patterns)
 }
 
 func (d *Driver) LoadWorkspace(cfg *packages.Config, patterns []string) (*packages.DriverResponse, error) {
-	overlay, err := d.CreateOverlay(cfg.Overlay)
+	overlay := fsutil.NewOverlay()
+
+	err := d.ReadCacheDir(overlay)
 	if err != nil {
 		return nil, err
 	}
 
-	path, cleanup, err := WriteOverlay(overlay)
-	if err != nil {
-		return nil, err
-	}
-	defer cleanup()
+	if overlay.Len() > 0 && len(cfg.Overlay) > 0 {
+		dir, err := os.MkdirTemp(d.fsys.Dir(), "overlay-*")
+		if err != nil {
+			return nil, err
+		}
+		defer os.RemoveAll(dir)
 
-	if path != "" {
+		err = overlay.Append(dir, cfg.Overlay)
+		if err != nil {
+			return nil, err
+		}
+
+		cfg.Overlay = nil
+	}
+
+	if overlay.Len() > 0 {
+		path, err := WriteOverlay(d.fsys.Dir(), overlay)
+		if err != nil {
+			return nil, err
+		}
+		defer os.Remove(path)
+
 		cfg.BuildFlags = append(cfg.BuildFlags,
 			"-overlay", path,
 		)
-		cfg.Overlay = nil
 	}
 
 	cfg.Env = append(cfg.Env,
@@ -126,38 +150,32 @@ func (d *Driver) LoadWorkspace(cfg *packages.Config, patterns []string) (*packag
 	return resp, nil
 }
 
-func (d *Driver) CreateOverlay(initial map[string][]byte) (Overlay, error) {
-	overlay := NewOverlay(initial)
-
-	err := d.ReadCacheDir(overlay)
-	if err != nil {
-		return Overlay{}, err
-	}
-
-	return overlay, nil
-}
-
-func (d *Driver) ReadCacheDir(overlay Overlay) error {
-	mod, err := ReadModFile(d.bazel.Workspace())
+func (d *Driver) ReadCacheDir(overlay fsutil.Overlay) error {
+	mod, err := ReadModFile(d.workspaceDir)
 	if err != nil {
 		return err
 	}
 
-	return d.bazel.WalkCacheDir(func(path, base string) error {
-		if !strings.HasSuffix(base, ".go") {
+	dir, err := LookCacheDir(d.fsys, d.bazel, d.workspaceDir)
+	if err != nil {
+		return err
+	}
+
+	return WalkCacheDir(dir, func(abs, rel string) error {
+		if !strings.HasSuffix(rel, ".go") {
 			return nil
 		}
 
-		base, found := CutProtoPrefix(base)
+		rel, found := CutProtoPrefix(rel)
 		if !found {
-			overlay.Link(filepath.Join(d.bazel.Workspace(), base), path)
+			overlay.Link(filepath.Join(d.workspaceDir, rel), abs)
 			return nil
 		}
 
 		if mod.Module != nil {
-			base, found := strings.CutPrefix(base, mod.Module.Mod.Path)
+			rel, found := strings.CutPrefix(rel, mod.Module.Mod.Path)
 			if found {
-				overlay.Link(filepath.Join(d.bazel.Workspace(), base), path)
+				overlay.Link(filepath.Join(d.workspaceDir, rel), abs)
 				return nil
 			}
 		}

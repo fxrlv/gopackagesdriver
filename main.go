@@ -24,9 +24,9 @@ func main() {
 	}
 
 	config := DriverConfig{
-		Workspace: os.Getenv("GOPACKAGESDRIVER_WORKSPACE"),
-		Bazel:     os.Getenv("GOPACKAGESDRIVER_BAZEL"),
-		Workdir:   workdir,
+		WorkspaceDir: os.Getenv("GOPACKAGESDRIVER_WORKSPACE"),
+		WorkingDir:   workdir,
+		Bazel:        os.Getenv("GOPACKAGESDRIVER_BAZEL"),
 	}
 
 	driver, err := NewDriver(&config)
