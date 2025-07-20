@@ -166,6 +166,10 @@ func (d *Driver) ReadCacheDir(overlay fsutil.Overlay) error {
 			return nil
 		}
 
+		if strings.HasSuffix(rel, "_gomock_prog.go") {
+			return nil
+		}
+
 		rel, found := CutProtoPrefix(rel)
 		if !found {
 			overlay.Link(filepath.Join(d.workspaceDir, rel), abs)
