@@ -88,29 +88,31 @@ func (d *Driver) Serve(req *packages.DriverRequest, patterns []string) (*package
 }
 
 func (d *Driver) LoadWorkspace(cfg *packages.Config, patterns []string) (*packages.DriverResponse, error) {
-	overlay := fsutil.NewOverlay()
+	cache := fsutil.NewOverlay()
 
-	err := d.ReadCacheDir(overlay)
+	err := d.ReadCacheDir(cache)
 	if err != nil {
 		return nil, err
 	}
 
-	if overlay.Len() > 0 && len(cfg.Overlay) > 0 {
-		dir, err := os.MkdirTemp(d.fsys.Dir(), "overlay-*")
-		if err != nil {
-			return nil, err
+	if cache.Len() > 0 {
+		overlay := cache
+
+		if len(cfg.Overlay) > 0 {
+			dir, err := os.MkdirTemp(d.fsys.Dir(), "overlay-*")
+			if err != nil {
+				return nil, err
+			}
+			defer os.RemoveAll(dir)
+
+			overlay, err = cache.Append(dir, cfg.Overlay)
+			if err != nil {
+				return nil, err
+			}
+
+			cfg.Overlay = nil
 		}
-		defer os.RemoveAll(dir)
 
-		err = overlay.Append(dir, cfg.Overlay)
-		if err != nil {
-			return nil, err
-		}
-
-		cfg.Overlay = nil
-	}
-
-	if overlay.Len() > 0 {
 		path, err := WriteOverlay(d.fsys.Dir(), overlay)
 		if err != nil {
 			return nil, err
@@ -133,14 +135,14 @@ func (d *Driver) LoadWorkspace(cfg *packages.Config, patterns []string) (*packag
 
 	for _, pkg := range resp.Packages {
 		for i, file := range pkg.GoFiles {
-			path, found := overlay.ReadLink(file)
+			path, found := cache.ReadLink(file)
 			if found {
 				pkg.GoFiles[i] = path
 			}
 		}
 
 		for i, file := range pkg.CompiledGoFiles {
-			path, found := overlay.ReadLink(file)
+			path, found := cache.ReadLink(file)
 			if found {
 				pkg.CompiledGoFiles[i] = path
 			}
