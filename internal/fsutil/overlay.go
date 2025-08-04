@@ -3,6 +3,7 @@ package fsutil
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 )
@@ -30,7 +31,9 @@ func (o Overlay) ReadLink(name string) (string, bool) {
 	return source, found
 }
 
-func (o Overlay) Append(dir string, content map[string][]byte) error {
+func (o Overlay) Append(dir string, content map[string][]byte) (Overlay, error) {
+	o.replace = maps.Clone(o.replace)
+
 	for target, data := range content {
 		source := filepath.Join(dir, fmt.Sprintf(
 			"%d-%s", o.Len(), filepath.Base(target),
@@ -38,13 +41,13 @@ func (o Overlay) Append(dir string, content map[string][]byte) error {
 
 		err := os.WriteFile(source, data, 0600)
 		if err != nil {
-			return err
+			return o, err
 		}
 
 		o.Link(target, source)
 	}
 
-	return nil
+	return o, nil
 }
 
 type overlayJSON struct {
