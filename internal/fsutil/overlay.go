@@ -41,10 +41,10 @@ func (o Overlay) Append(dir string, content map[string][]byte) (Overlay, error) 
 
 		err := os.WriteFile(source, data, 0600)
 		if err != nil {
-			return o, err
+			return Overlay{}, err
 		}
 
-		o.Link(target, source)
+		o.replace[target] = source
 	}
 
 	return o, nil

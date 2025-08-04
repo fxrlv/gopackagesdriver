@@ -105,7 +105,7 @@ func (d *Driver) LoadWorkspace(cfg *packages.Config, patterns []string) (*packag
 			}
 			defer os.RemoveAll(dir)
 
-			overlay, err = cache.Append(dir, cfg.Overlay)
+			overlay, err = overlay.Append(dir, cfg.Overlay)
 			if err != nil {
 				return nil, err
 			}
