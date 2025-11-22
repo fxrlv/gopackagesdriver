@@ -22,9 +22,9 @@ func Load(cfg *packages.Config, patterns []string) (*packages.DriverResponse, er
 		resp.Roots = append(resp.Roots, pkg.ID)
 	}
 
-	packages.Visit(pkgs, nil, func(pkg *packages.Package) {
+	for pkg := range packages.Postorder(pkgs) {
 		resp.Packages = append(resp.Packages, pkg)
-	})
+	}
 
 	return &resp, nil
 }
